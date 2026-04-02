@@ -26,9 +26,7 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "allowToChangeInstallationDirectory": true
     },
     "publish": {
       "provider": "github",

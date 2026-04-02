@@ -2,7 +2,7 @@ import { Download, Lock, Zap, Shield, CheckCircle, ArrowRight } from 'lucide-rea
 
 export function LandingPage() {
   const handleDownload = () => {
-    window.location.href = 'https://github.com/Marco91firenze/Repo-Definitivo/releases/latest/download/CV-Fit-Check-Setup.exe';
+    window.location.href = 'https://github.com/Marco91firenze/Repo-Test/releases/latest/download/CV-Fit-Check-Setup.exe';
   };
 
   return (

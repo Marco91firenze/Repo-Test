@@ -30,6 +30,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "publish": {
+      "releaseType": "release",
       "provider": "github",
       "owner": "Marco91firenze",
       "repo": "Repo-Test"

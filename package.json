@@ -1,6 +1,7 @@
 {
   "name": "cv-fit-check",
   "version": "1.0.0",
+  "description": "Privacy-first CV ranking tool with local AI analysis",
   "main": "dist-electron/main.js",
   "author": "Marco91firenze",
   "scripts": {

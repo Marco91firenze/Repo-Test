@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 // @ts-ignore
 import pdfParse from 'pdf-parse';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { findSkillMatches, extractSkillEvidence, normalizeSkill, type SkillMatchResult } from './skillMatcher.js';
 import { type StructuredCVData, type ExtractedSkill, type WorkExperienceEntry, extractPII, anonymizeForLLM } from './anonymizer.js';
 import { analyzeWithOllama, ensureModelAvailable } from './ollamaClient.js';
@@ -487,7 +487,7 @@ export async function processCVFile(
     }
 
     // Step 6: Save to database
-    const analysisId = uuidv4();
+    const analysisId = crypto.randomUUID();
     const filename = filePath.split(/[/\\]/).pop() || 'unknown';
     const candidateName = structured.name || filename.replace(/\.\w+$/, '');
 

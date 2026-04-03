@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
-import isDev from 'electron-is-dev';
 import { initializeDatabase, getUserProfile, createUserProfile, getJobs, getJob, createJob, deleteJob, getResultsForJob, deleteResult, clearResultsForJob, getSetting, setSetting, getAllSettings, deductCredit, updateCredits } from './services/database.js';
 import { processCVFile } from './services/cvProcessor.js';
 import { checkOllamaStatus, ensureModelAvailable } from './services/ollamaClient.js';
@@ -18,6 +17,8 @@ function createWindow() {
       contextIsolation: true,
     },
   });
+
+  const isDev = !app.isPackaged;
 
   const startUrl = isDev
     ? 'http://localhost:5173'

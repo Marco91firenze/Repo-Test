@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UserProvider, useUser } from './contexts/UserContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { SetupForm } from './components/SetupForm';
@@ -34,13 +34,13 @@ function AppContent() {
 function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <HashRouter>
         <UserProvider>
           <LanguageProvider>
             <AppContent />
           </LanguageProvider>
         </UserProvider>
-      </BrowserRouter>
+      </HashRouter>
     </ErrorBoundary>
   );
 }

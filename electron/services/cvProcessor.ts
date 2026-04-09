@@ -242,7 +242,8 @@ export function parseCV(rawText: string, requiredSkills: string[]): StructuredCV
 function algorithmicScore(
   structured: StructuredCVData,
   skillMatches: Map<string, SkillMatchResult>,
-  jobData: Job
+  jobData: Job,
+  rawText: string
 ): {
   fit_score: number;
   experience_score: number;
@@ -289,7 +290,7 @@ function algorithmicScore(
         skill: canonical,
         percentage: match.confidence,
         assessment: match.confidence >= 80 ? 'Strong match' : match.confidence >= 50 ? 'Moderate match' : 'Weak match',
-        evidence: extractSkillEvidence('', canonical),
+        evidence: extractSkillEvidence(rawText, canonical),
       });
     } else {
       skillBreakdown.push({
@@ -302,12 +303,14 @@ function algorithmicScore(
   }
 
   const skillsRatio = requiredSkills.length > 0 ? matchedCount / requiredSkills.length : 0;
-  const skillsScore = Math.round(skillsRatio * 30);
+  const avgConfidence = matchedCount > 0 ? totalConfidence / matchedCount : 0;
+  // Weight both coverage (how many matched) and quality (confidence level)
+  const skillsScore = Math.round(skillsRatio * 20 + (avgConfidence / 100) * skillsRatio * 10);
 
   // Location score (0-15)
   let locationScore = 0;
   if (isRemote) {
-    locationScore = 0;
+    locationScore = 15; // Remote job = location is irrelevant, full marks
   } else {
     const jobLocation = (jobData.location || '').toLowerCase();
     const cvLocation = `${structured.locationCity} ${structured.locationCountry}`.toLowerCase();
@@ -353,11 +356,35 @@ function algorithmicScore(
     gaps.push(`${structured.totalYearsExperience} years experience is below the ${minExp} year minimum`);
   }
 
+  if (structured.educationLevel !== 'Unknown') {
+    keyStrengths.push(`Education: ${structured.educationLevel}`);
+  }
+  if (structured.otherLanguages.length > 0) {
+    keyStrengths.push(`Multilingual: ${structured.otherLanguages.join(', ')}`);
+  }
+  if (structured.workExperienceSummary.length > 0) {
+    const roles = structured.workExperienceSummary.map(w => w.roleTitle).slice(0, 3);
+    keyStrengths.push(`Recent roles: ${roles.join(', ')}`);
+  }
+
+  // Check for related/partial matches
+  const partialMatches = requiredSkills.filter(s => {
+    const canonical = normalizeSkill(s);
+    const match = skillMatches.get(canonical);
+    return !match?.found && match?.relatedFound && match.relatedFound.length > 0;
+  });
+  if (partialMatches.length > 0) {
+    gaps.push(`Partial matches (related skills found): ${partialMatches.map(s => normalizeSkill(s)).join(', ')}`);
+  }
+
   if (structured.totalYearsExperience === 0) {
     riskFactors.push('Could not determine years of experience from CV');
   }
   if (structured.englishLevel === 'Unknown') {
     riskFactors.push('English level could not be determined');
+  }
+  if (matchedCount < requiredSkills.length * 0.3) {
+    riskFactors.push(`Low skill coverage: only ${matchedCount}/${requiredSkills.length} required skills found`);
   }
 
   let recommendation = 'maybe';
@@ -368,7 +395,15 @@ function algorithmicScore(
 
   const expQuality = Math.min(100, Math.round((experienceScore / 40) * 100));
   const skillRelevance = Math.min(100, Math.round(skillsRatio * 100));
-  const confidence = structured.totalYearsExperience > 0 && matchedCount > 0 ? 70 : 40;
+  // Higher confidence when we have more data points
+  let confidence = 40;
+  if (structured.totalYearsExperience > 0) confidence += 15;
+  if (matchedCount > 0) confidence += 10;
+  if (matchedCount > requiredSkills.length * 0.5) confidence += 10;
+  if (structured.educationLevel !== 'Unknown') confidence += 5;
+  if (structured.englishLevel !== 'Unknown') confidence += 5;
+  if (structured.certifications.length > 0) confidence += 5;
+  confidence = Math.min(95, confidence);
 
   return {
     fit_score: fitScore,
@@ -379,7 +414,7 @@ function algorithmicScore(
     experience_quality_score: expQuality,
     skill_relevance_score: skillRelevance,
     confidence_level: confidence,
-    summary: `Candidate has ${structured.totalYearsExperience} years of experience. ${matchedCount}/${requiredSkills.length} required skills matched. English level: ${structured.englishLevel}. Location: ${structured.locationCity || 'Unknown'}.`,
+    summary: `Candidate with ${structured.totalYearsExperience} years of experience and ${structured.educationLevel !== 'Unknown' ? structured.educationLevel : 'undetermined education'}. Skills coverage: ${matchedCount}/${requiredSkills.length} required skills matched${avgConfidence > 0 ? ' (avg confidence: ' + Math.round(avgConfidence) + '%)' : ''}. English: ${structured.englishLevel}. Location: ${structured.locationCity || 'Unknown'}.${structured.certifications.length > 0 ? ' Certifications: ' + structured.certifications.slice(0,2).join(', ') + '.' : ''}`,
     skill_breakdown: skillBreakdown,
     key_strengths: keyStrengths,
     gaps,
@@ -464,16 +499,16 @@ export async function processCVFile(
           analysis = ollamaResult;
         } else {
           // Ollama not available, fall back to algorithmic
-          analysis = algorithmicScore(structured, skillMatches, jobData);
+          analysis = algorithmicScore(structured, skillMatches, jobData, rawText);
         }
       } catch (ollamaError) {
         // Ollama failed, fall back to algorithmic
         console.error('Ollama analysis failed, using algorithmic fallback:', ollamaError);
-        analysis = algorithmicScore(structured, skillMatches, jobData);
+        analysis = algorithmicScore(structured, skillMatches, jobData, rawText);
       }
     } else {
       // Ollama not enabled, use algorithmic
-      analysis = algorithmicScore(structured, skillMatches, jobData);
+      analysis = algorithmicScore(structured, skillMatches, jobData, rawText);
     }
 
     // Step 5: Build skill evidence and variations

@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { findSkillMatches, extractSkillEvidence, normalizeSkill, type SkillMatchResult } from './skillMatcher.js';
 import { type StructuredCVData, type ExtractedSkill, type WorkExperienceEntry, extractPII, anonymizeForLLM } from './anonymizer.js';
 import { analyzeWithOllama, ensureModelAvailable } from './ollamaClient.js';
-import { saveCVAnalysis, getJob, getSetting, deductCredit, type Job } from './database.js';
+import { saveCVAnalysis, getJob, getSetting, deductCredit, getUserProfile, type Job } from './database.js';
 
 const pdf: any = pdfParse;
 
@@ -442,10 +442,15 @@ export async function processCVFile(
   filename: string;
   candidate_name: string;
 }> {
-  // Step 0: Check credits
-  const creditResult = deductCredit();
-  if (!creditResult.success) {
-    throw new Error('No CV selecting credits remaining. Please purchase more credits to continue.');
+  // Step 0: Check credits (admin bypass for owner account)
+  const ADMIN_EMAILS = ['marcorome91@gmail.com'];
+  const currentProfile = getUserProfile();
+  const isAdmin = currentProfile && ADMIN_EMAILS.includes(currentProfile.email.toLowerCase());
+  if (!isAdmin) {
+    const creditResult = deductCredit();
+    if (!creditResult.success) {
+      throw new Error('No CV selecting credits remaining. Please purchase more credits to continue.');
+    }
   }
 
   try {

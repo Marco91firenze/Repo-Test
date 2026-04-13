@@ -2,7 +2,7 @@ import { Download, Lock, Zap, Shield, CheckCircle, ArrowRight } from 'lucide-rea
 
 export function LandingPage() {
   const handleDownload = () => {
-    window.location.href = 'https://github.com/Marco91firenze/Repo-Test/releases/latest/download/CV-Fit-Check-Setup.exe';
+    window.location.href = 'https://github.com/Marco91firenze/Repo-Test/releases/latest/download/CV-AI-Scanner-Setup.exe';
   };
 
   return (
@@ -41,7 +41,7 @@ export function LandingPage() {
                 CV Ranking Made <span className="bg-gradient-to-r from-blue-600 to-blue-500 bg-clip-text text-transparent">Private & Secure</span>
               </h2>
               <p className="text-xl text-slate-600 mb-8 leading-relaxed">
-                CV Fit Check is a CV ranking system that uses a locally installed artificial intelligence LLM to analyze the CVs you select without neither the CVs nor their sensitive data ever exiting your company's computer.
+                CV AI Scanner is a CV ranking system that uses a locally installed artificial intelligence LLM to analyze the CVs you select without neither the CVs nor their sensitive data ever exiting your company's computer.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <button

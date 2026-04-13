@@ -38,7 +38,7 @@ export function Dashboard() {
                 <Briefcase className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-900">CV Fit Check</h1>
+                <h1 className="text-xl font-bold text-slate-900">CV AI Scanner</h1>
                 {user && (
                   <p className="text-xs text-slate-500">{user.company_name}</p>
                 )}

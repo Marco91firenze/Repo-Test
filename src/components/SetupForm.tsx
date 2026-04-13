@@ -32,7 +32,7 @@ export function SetupForm() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
             <Zap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome to CV Fit Check</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome to CV AI Scanner</h1>
           <p className="text-slate-600">
             Set up your profile to get started. You have <span className="font-semibold text-blue-600">10 free CV selecting credits</span>.
           </p>

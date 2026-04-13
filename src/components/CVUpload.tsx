@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, FileText, X, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react';
 
 interface Job {
   id: string;
   title: string;
   location: string;
+  is_remote?: number;
 }
 
 interface CVUploadProps {
@@ -16,7 +17,7 @@ interface CVUploadProps {
 interface SelectedFile {
   path: string;
   name: string;
-  status: 'pending' | 'processing' | 'success' | 'error';
+  status: 'pending' | 'skipped' | 'processing' | 'success' | 'error';
   error?: string;
 }
 
@@ -27,6 +28,7 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(initialJobId);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   useEffect(() => {
@@ -74,7 +76,6 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
       f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       f.type === 'application/msword'
     );
-
     const newFiles: SelectedFile[] = validFiles.map(f => ({
       path: (f as any).path || f.name,
       name: f.name,
@@ -90,8 +91,55 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   const handleProcess = async () => {
     if (!selectedJobId || files.length === 0) return;
 
-    const pendingCount = files.filter(f => f.status === 'pending').length;
+    setOllamaError(null);
+
+    // Check Ollama is available before doing anything
+    try {
+      const ollamaCheck = await (window as any).electronAPI.checkOllama();
+      if (!ollamaCheck?.success || !ollamaCheck?.data?.available) {
+        setOllamaError(
+          'Ollama is not running. Please start Ollama before analysing CVs. ' +
+          'Visit the Credits tab for setup instructions.'
+        );
+        return;
+      }
+      if (!ollamaCheck.data.models || ollamaCheck.data.models.length === 0) {
+        setOllamaError(
+          'No AI model found in Ollama. Please run: ollama pull llama3.1:8b — then try again. ' +
+          'See the Credits tab for the full setup guide.'
+        );
+        return;
+      }
+    } catch {
+      setOllamaError('Could not connect to Ollama. Please start Ollama and try again.');
+      return;
+    }
+
+    // Fetch already-analysed filenames to skip duplicates
+    let existingFilenames: Set<string> = new Set();
+    try {
+      const existingResult = await (window as any).electronAPI.getExistingFilenames(selectedJobId);
+      if (existingResult?.success && Array.isArray(existingResult.data)) {
+        existingFilenames = new Set(existingResult.data);
+      }
+    } catch { /* best-effort, continue anyway */ }
+
+    // Mark duplicates as skipped before processing
+    const updatedFiles = files.map(f =>
+      f.status === 'pending' && existingFilenames.has(f.name)
+        ? { ...f, status: 'skipped' as const }
+        : f
+    );
+    setFiles(updatedFiles);
+
+    const pendingFiles = updatedFiles.filter(f => f.status === 'pending');
+    const pendingCount = pendingFiles.length;
     const creditsAvailable = user?.credits_remaining ?? 0;
+
+    if (pendingCount === 0) {
+      // All files were skipped (duplicates)
+      return;
+    }
 
     if (creditsAvailable < pendingCount) {
       setShowUpgradeModal(true);
@@ -100,8 +148,8 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
 
     setProcessing(true);
 
-    for (let i = 0; i < files.length; i++) {
-      if (files[i].status !== 'pending') continue;
+    for (let i = 0; i < updatedFiles.length; i++) {
+      if (updatedFiles[i].status !== 'pending') continue;
 
       setFiles(prev =>
         prev.map((f, idx) => idx === i ? { ...f, status: 'processing' } : f)
@@ -117,9 +165,19 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
         );
         await refreshProfile();
       } catch (error: any) {
+        const msg: string = error.message || 'Analysis failed';
+        // Propagate Ollama-not-running errors as a banner, not per-file
+        if (msg.toLowerCase().includes('ollama')) {
+          setOllamaError(msg);
+          setFiles(prev =>
+            prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: 'Ollama required' } : f)
+          );
+          setProcessing(false);
+          return;
+        }
         setFiles(prev =>
           prev.map((f, idx) =>
-            idx === i ? { ...f, status: 'error', error: error.message } : f
+            idx === i ? { ...f, status: 'error', error: msg } : f
           )
         );
       }
@@ -135,6 +193,20 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
           <p className="text-sm text-amber-800">
             You have {user.credits_remaining} CV selecting credit{user.credits_remaining !== 1 ? 's' : ''} remaining.
           </p>
+        </div>
+      )}
+
+      {/* Ollama error banner */}
+      {ollamaError && (
+        <div className="bg-red-50 border border-red-300 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-red-800">AI Engine Required</p>
+            <p className="text-sm text-red-700 mt-0.5">{ollamaError}</p>
+          </div>
+          <button onClick={() => setOllamaError(null)} className="ml-auto text-red-400 hover:text-red-600">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -156,7 +228,7 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
           <option value="">{t('cvUpload.chooseJob')}</option>
           {jobs.map((job) => (
             <option key={job.id} value={job.id}>
-              {job.title} - {job.location}
+              {job.title} — {job.is_remote ? '🌐 Remote' : job.location}
             </option>
           ))}
         </select>
@@ -193,7 +265,9 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
               {files.map((file, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between bg-slate-50 p-4 rounded-lg"
+                  className={`flex items-center justify-between p-4 rounded-lg ${
+                    file.status === 'skipped' ? 'bg-slate-50 opacity-70' : 'bg-slate-50'
+                  }`}
                 >
                   <div className="flex items-center space-x-3 flex-1">
                     <FileText className="w-5 h-5 text-slate-400" />
@@ -201,6 +275,9 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
                       <p className="text-sm font-medium text-slate-900 truncate">
                         {file.name}
                       </p>
+                      {file.status === 'skipped' && (
+                        <p className="text-xs text-slate-500">Already analysed — skipped</p>
+                      )}
                       {file.error && (
                         <p className="text-xs text-red-600">{file.error}</p>
                       )}
@@ -208,11 +285,14 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
                     {file.status === 'success' && (
                       <CheckCircle className="w-5 h-5 text-green-600" />
                     )}
+                    {file.status === 'skipped' && (
+                      <Info className="w-5 h-5 text-slate-400" />
+                    )}
                     {file.status === 'error' && (
                       <AlertCircle className="w-5 h-5 text-red-600" />
                     )}
                     {file.status === 'processing' && (
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                      <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
                     )}
                   </div>
                   {file.status === 'pending' && !processing && (
@@ -230,11 +310,12 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
                 <button
                   onClick={handleProcess}
                   disabled={processing || files.every(f => f.status !== 'pending')}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {processing ? 'Analyzing CVs...' : 'Analyze Selected CVs'}
+                  {processing && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {processing ? 'Analysing CVs...' : 'Analyse Selected CVs'}
                 </button>
-                {files.some(f => f.status === 'success') && (
+                {files.some(f => f.status === 'success' || f.status === 'skipped') && (
                   <button
                     onClick={() => setFiles([])}
                     className="px-6 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-3 rounded-lg transition-colors"

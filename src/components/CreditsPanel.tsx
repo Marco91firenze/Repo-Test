@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '../contexts/UserContext';
-import { CreditCard, Zap, AlertCircle, RefreshCw, Cpu, Calculator, ExternalLink, CheckCircle, Loader2 } from 'lucide-react';
+import { CreditCard, Zap, AlertCircle, RefreshCw, Cpu, ExternalLink, CheckCircle, Loader2, Terminal } from 'lucide-react';
 
 interface OllamaStatus {
   available: boolean;
@@ -8,7 +8,6 @@ interface OllamaStatus {
   url?: string;
 }
 
-type AnalysisMode = 'algorithmic' | 'ollama';
 type OllamaSetupState = 'idle' | 'checking' | 'pulling' | 'ready' | 'not_installed';
 
 export function CreditsPanel() {
@@ -17,16 +16,13 @@ export function CreditsPanel() {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
-  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('algorithmic');
-  const [loadingSettings, setLoadingSettings] = useState(true);
-  const [setupState, setSetupState] = useState<OllamaSetupState>('idle');
+  const [setupState, setSetupState] = useState<OllamaSetupState>('checking');
   const [pullProgress, setPullProgress] = useState<string>('');
 
   useEffect(() => {
-    loadSettings();
+    checkAndSetupOllama();
   }, []);
 
-  // Listen for pull progress events from the main process
   useEffect(() => {
     const cleanup = (window as any).electronAPI?.onOllamaPullProgress?.((data: { status: string; completed?: number; total?: number }) => {
       if (data.completed && data.total && data.total > 0) {
@@ -39,23 +35,6 @@ export function CreditsPanel() {
     return () => { if (cleanup) cleanup(); };
   }, []);
 
-  const loadSettings = async () => {
-    try {
-      const result = await (window as any).electronAPI.getSettings();
-      if (result?.success && result.data) {
-        const enabled = result.data['ollama_enabled'] === 'true';
-        setAnalysisMode(enabled ? 'ollama' : 'algorithmic');
-        if (enabled) {
-          checkAndSetupOllama();
-        }
-      }
-    } catch {
-      // defaults to algorithmic
-    } finally {
-      setLoadingSettings(false);
-    }
-  };
-
   const checkAndSetupOllama = useCallback(async () => {
     setSetupState('checking');
     try {
@@ -66,7 +45,6 @@ export function CreditsPanel() {
           if (result.data.models && result.data.models.length > 0) {
             setSetupState('ready');
           } else {
-            // Ollama running but no models - auto-pull
             await autoSetup();
           }
         } else {
@@ -87,7 +65,6 @@ export function CreditsPanel() {
       const result = await (window as any).electronAPI.setupOllama();
       if (result?.success) {
         setSetupState('ready');
-        // Refresh status
         const status = await (window as any).electronAPI.checkOllama();
         if (status?.success) setOllamaStatus(status.data);
       } else {
@@ -97,15 +74,6 @@ export function CreditsPanel() {
       setSetupState('not_installed');
     }
     setPullProgress('');
-  };
-
-  const selectMode = async (mode: AnalysisMode) => {
-    setAnalysisMode(mode);
-    await (window as any).electronAPI.updateSettings('ollama_enabled', mode === 'ollama' ? 'true' : 'false');
-
-    if (mode === 'ollama') {
-      checkAndSetupOllama();
-    }
   };
 
   const handlePurchase = async (packageSize: string) => {
@@ -136,7 +104,7 @@ export function CreditsPanel() {
     }
   };
 
-  if (!user || loadingSettings) return null;
+  if (!user) return null;
 
   return (
     <div className="space-y-6">
@@ -176,176 +144,119 @@ export function CreditsPanel() {
         </div>
       )}
 
-      {/* Analysis Mode Selection */}
-      <div>
-        <h4 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+      {/* AI Engine Status — always visible */}
+      <div className="border border-slate-200 rounded-xl p-5">
+        <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
           <Cpu className="w-5 h-5" />
-          Analysis Mode
+          AI Engine (Ollama)
         </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Algorithmic Mode */}
-          <button
-            onClick={() => selectMode('algorithmic')}
-            className={`text-left border-2 rounded-xl p-5 transition-all ${
-              analysisMode === 'algorithmic'
-                ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
-                : 'border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <div className="flex items-start gap-3 mb-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                analysisMode === 'algorithmic' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-              }`}>
-                <Calculator className="w-5 h-5" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h5 className="font-semibold text-slate-900">Algorithmic</h5>
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Ready to use</span>
-                </div>
-                <p className="text-sm text-slate-600 mt-1">
-                  Works immediately. Uses pattern matching and scoring algorithms to rank CVs.
-                </p>
-              </div>
-            </div>
-            <ul className="text-xs text-slate-500 space-y-1 ml-[52px]">
-              <li>No extra downloads needed</li>
-              <li>Fast and lightweight</li>
-              <li>Good accuracy for skill and experience matching</li>
-            </ul>
-          </button>
 
-          {/* Ollama / LLM Mode */}
-          <button
-            onClick={() => selectMode('ollama')}
-            className={`text-left border-2 rounded-xl p-5 transition-all ${
-              analysisMode === 'ollama'
-                ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
-                : 'border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <div className="flex items-start gap-3 mb-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                analysisMode === 'ollama' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-              }`}>
-                <Cpu className="w-5 h-5" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h5 className="font-semibold text-slate-900">AI-Powered</h5>
-                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Higher quality</span>
-                </div>
-                <p className="text-sm text-slate-600 mt-1">
-                  Uses a local AI model for deeper, more nuanced CV analysis. Requires Ollama (free).
-                </p>
-              </div>
-            </div>
-            <ul className="text-xs text-slate-500 space-y-1 ml-[52px]">
-              <li>Requires one-time Ollama install (free)</li>
-              <li>More detailed reasoning and insights</li>
-              <li>Still 100% private - AI runs on your machine</li>
-            </ul>
-          </button>
-        </div>
-      </div>
+        {setupState === 'checking' && (
+          <div className="flex items-center gap-3 py-3">
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+            <span className="text-sm text-slate-600">Detecting Ollama...</span>
+          </div>
+        )}
 
-      {/* Ollama Setup Status (shown when ollama mode selected) */}
-      {analysisMode === 'ollama' && (
-        <div className="border border-slate-200 rounded-xl p-5">
-          <h4 className="font-semibold text-slate-900 mb-3">AI Engine Status</h4>
-
-          {setupState === 'checking' && (
-            <div className="flex items-center gap-3 py-3">
+        {setupState === 'pulling' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
               <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-              <span className="text-sm text-slate-600">Detecting Ollama...</span>
+              <span className="text-sm text-slate-600">Downloading AI model — one-time setup.</span>
             </div>
-          )}
-
-          {setupState === 'pulling' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                <span className="text-sm text-slate-600">Downloading AI model... This is a one-time setup.</span>
+            {pullProgress && (
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-xs text-slate-500 font-mono">{pullProgress}</p>
               </div>
-              {pullProgress && (
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs text-slate-500 font-mono">{pullProgress}</p>
-                </div>
-              )}
-              <p className="text-xs text-slate-400">
-                The model is several GB. This may take a few minutes depending on your connection.
-              </p>
-            </div>
-          )}
-
-          {setupState === 'ready' && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <span className="text-sm font-medium text-green-800">AI engine is ready</span>
-              </div>
-              <p className="text-xs text-green-700 ml-7">
-                Ollama is running and the AI model is loaded. CVs will be analyzed using AI.
-                {ollamaStatus?.models && ollamaStatus.models.length > 0 && (
-                  <span className="block mt-1">Model: {ollamaStatus.models[0]}</span>
-                )}
-              </p>
-            </div>
-          )}
-
-          {setupState === 'not_installed' && (
-            <div className="space-y-4">
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800">Ollama not detected</p>
-                    <p className="text-sm text-amber-700 mt-1">
-                      Install Ollama (free) and our app will connect to it automatically. No configuration needed.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-4">
-                <p className="text-sm font-medium text-slate-700 mb-3">Quick setup:</p>
-                <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
-                  <li>
-                    Download Ollama from{' '}
-                    <a
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        window.open('https://ollama.com/download', '_blank');
-                      }}
-                      className="text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1"
-                    >
-                      ollama.com/download
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </li>
-                  <li>Install and run it (just double-click the installer)</li>
-                  <li>Come back here - the app downloads the AI model automatically</li>
-                </ol>
-              </div>
-
-              <button
-                onClick={checkAndSetupOllama}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Check again
-              </button>
-            </div>
-          )}
-
-          <div className="mt-3 pt-3 border-t border-slate-100">
+            )}
             <p className="text-xs text-slate-400">
-              Ollama runs entirely on your machine. Our app anonymizes all personal data before the AI sees it.
+              The model is several GB. This may take a few minutes.
             </p>
           </div>
+        )}
+
+        {setupState === 'ready' && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <span className="text-sm font-medium text-green-800">AI engine ready</span>
+            </div>
+            <p className="text-xs text-green-700 ml-7">
+              Ollama is running and the AI model is loaded. CVs will be analysed using local AI.
+              {ollamaStatus?.models && ollamaStatus.models.length > 0 && (
+                <span className="block mt-1">Model: {ollamaStatus.models[0]}</span>
+              )}
+            </p>
+            <button
+              onClick={checkAndSetupOllama}
+              className="mt-3 ml-7 text-xs text-green-700 hover:text-green-900 underline"
+            >
+              Re-check status
+            </button>
+          </div>
+        )}
+
+        {setupState === 'not_installed' && (
+          <div className="space-y-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-red-800">Ollama not running</p>
+                  <p className="text-sm text-red-700 mt-1">
+                    CV AI Scanner requires Ollama to analyse CVs. Please follow the steps below to get set up — it only takes a few minutes.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-slate-800 mb-3">Setup guide:</p>
+              <ol className="text-sm text-slate-700 space-y-3 list-decimal list-inside">
+                <li>
+                  <span className="font-medium">Download Ollama</span> — visit{' '}
+                  <a
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); (window as any).open?.('https://ollama.com/download', '_blank'); }}
+                    className="text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1"
+                  >
+                    ollama.com/download <ExternalLink className="w-3 h-3" />
+                  </a>
+                  {' '}and install it (free, runs locally).
+                </li>
+                <li>
+                  <span className="font-medium">Start Ollama</span> — on Windows, Ollama runs in the system tray after install. On Mac, you'll see the llama icon in the menu bar.
+                </li>
+                <li>
+                  <span className="font-medium">Download a model</span> — open a terminal and run:
+                  <div className="mt-1.5 bg-slate-900 text-green-400 text-xs font-mono rounded-md p-2.5 flex items-center gap-2">
+                    <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
+                    ollama pull llama3.1:8b
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">This is a ~4.7 GB download. Only needed once.</p>
+                </li>
+                <li>
+                  <span className="font-medium">Keep Ollama running</span> while using CV AI Scanner. It must run side-by-side with this app.
+                </li>
+              </ol>
+            </div>
+
+            <button
+              onClick={checkAndSetupOllama}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              I've started Ollama — check again
+            </button>
+          </div>
+        )}
+
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-400">
+            100% private — Ollama runs entirely on your machine. CV data never leaves your computer.
+          </p>
         </div>
-      )}
+      </div>
 
       {/* Purchase Options */}
       <div>

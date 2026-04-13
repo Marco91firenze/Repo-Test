@@ -15,12 +15,12 @@ export interface Job {
   id: string;
   title: string;
   location: string;
+  is_remote: number;
   english_level: string;
   minimum_experience: number;
   required_skills: string;
   description: string;
   status: string;
-  scoring_parameters: string | null;
   created_at: string;
 }
 
@@ -34,23 +34,11 @@ export interface CVAnalysis {
   skills_score: number;
   location_score: number;
   english_score: number;
-  experience_quality_score: number;
-  skill_relevance_score: number;
-  confidence_level: number;
-  years_experience: number;
-  location: string;
-  english_level: string;
-  other_languages: string;
-  summary: string;
-  skill_breakdown: string;
+  briefing: string;
   key_strengths: string;
   gaps: string;
-  risk_factors: string;
   recommendation: string;
   recommendation_reasoning: string;
-  reasoning_chain: string;
-  skill_evidence: string;
-  skill_variations_matched: string;
   created_at: string;
 }
 
@@ -95,12 +83,12 @@ export function initializeDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       location TEXT,
+      is_remote INTEGER DEFAULT 0,
       english_level TEXT,
       minimum_experience INTEGER DEFAULT 0,
       required_skills TEXT DEFAULT '[]',
       description TEXT DEFAULT '',
       status TEXT DEFAULT 'active',
-      scoring_parameters TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -114,23 +102,11 @@ export function initializeDatabase() {
       skills_score REAL DEFAULT 0,
       location_score REAL DEFAULT 0,
       english_score REAL DEFAULT 0,
-      experience_quality_score REAL DEFAULT 0,
-      skill_relevance_score REAL DEFAULT 0,
-      confidence_level REAL DEFAULT 0,
-      years_experience INTEGER DEFAULT 0,
-      location TEXT DEFAULT '',
-      english_level TEXT DEFAULT '',
-      other_languages TEXT DEFAULT '',
-      summary TEXT DEFAULT '',
-      skill_breakdown TEXT DEFAULT '[]',
+      briefing TEXT DEFAULT '',
       key_strengths TEXT DEFAULT '[]',
       gaps TEXT DEFAULT '[]',
-      risk_factors TEXT DEFAULT '[]',
       recommendation TEXT DEFAULT '',
       recommendation_reasoning TEXT DEFAULT '',
-      reasoning_chain TEXT DEFAULT '{}',
-      skill_evidence TEXT DEFAULT '{}',
-      skill_variations_matched TEXT DEFAULT '{}',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
     );
@@ -144,9 +120,31 @@ export function initializeDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_cv_analyses_job_id ON cv_analyses(job_id);
     CREATE INDEX IF NOT EXISTS idx_cv_analyses_fit_score ON cv_analyses(fit_score DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_unique ON cv_analyses(job_id, cv_filename);
   `);
 
+  // Migrations for existing installs
+  runMigrations();
+
   return db;
+}
+
+function runMigrations() {
+  // Add is_remote to jobs table if missing
+  try {
+    db.exec('ALTER TABLE jobs ADD COLUMN is_remote INTEGER DEFAULT 0');
+  } catch (_) { /* column already exists */ }
+
+  // Remove legacy scoring_parameters column if present (no-op in SQLite, just skip)
+  // Add briefing to cv_analyses if missing
+  try {
+    db.exec("ALTER TABLE cv_analyses ADD COLUMN briefing TEXT DEFAULT ''");
+  } catch (_) { /* column already exists */ }
+
+  // Add unique index if missing
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_unique ON cv_analyses(job_id, cv_filename)');
+  } catch (_) { /* index already exists or conflict with existing duplicates */ }
 }
 
 export function getDatabase() {
@@ -224,25 +222,25 @@ export function createJob(jobData: {
   id: string;
   title: string;
   location: string;
+  is_remote: number;
   english_level: string;
   minimum_experience: number;
   required_skills: string[];
   description: string;
-  scoring_parameters?: Record<string, unknown> | null;
 }): Job {
   const stmt = db.prepare(`
-    INSERT INTO jobs (id, title, location, english_level, minimum_experience, required_skills, description, status, scoring_parameters)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+    INSERT INTO jobs (id, title, location, is_remote, english_level, minimum_experience, required_skills, description, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
   `);
   stmt.run(
     jobData.id,
     jobData.title,
     jobData.location,
+    jobData.is_remote ? 1 : 0,
     jobData.english_level,
     jobData.minimum_experience,
     JSON.stringify(jobData.required_skills),
-    jobData.description || '',
-    jobData.scoring_parameters ? JSON.stringify(jobData.scoring_parameters) : null
+    jobData.description || ''
   );
   return getJob(jobData.id)!;
 }
@@ -263,6 +261,11 @@ export function deleteJob(jobId: string): void {
 
 // ── CV Analyses ──
 
+export function getExistingFilenames(jobId: string): Set<string> {
+  const rows = db.prepare('SELECT cv_filename FROM cv_analyses WHERE job_id = ?').all(jobId) as { cv_filename: string }[];
+  return new Set(rows.map(r => r.cv_filename));
+}
+
 export function saveCVAnalysis(data: {
   id: string;
   job_id: string;
@@ -271,51 +274,36 @@ export function saveCVAnalysis(data: {
   fit_score: number;
   experience_score: number;
   skills_score: number;
-  location_score: number;
+  location_score: number | null;
   english_score: number;
-  experience_quality_score: number;
-  skill_relevance_score: number;
-  confidence_level: number;
-  years_experience: number;
-  location: string;
-  english_level: string;
-  other_languages: string;
-  summary: string;
-  skill_breakdown: unknown[];
+  briefing: string;
   key_strengths: string[];
   gaps: string[];
-  risk_factors: string[];
   recommendation: string;
   recommendation_reasoning: string;
-  reasoning_chain: Record<string, string>;
-  skill_evidence: Record<string, string>;
-  skill_variations_matched: Record<string, string[]>;
 }): void {
   const stmt = db.prepare(`
-    INSERT INTO cv_analyses (
-      id, job_id, cv_filename, candidate_name, fit_score,
-      experience_score, skills_score, location_score, english_score,
-      experience_quality_score, skill_relevance_score, confidence_level,
-      years_experience, location, english_level, other_languages,
-      summary, skill_breakdown, key_strengths, gaps, risk_factors,
-      recommendation, recommendation_reasoning, reasoning_chain,
-      skill_evidence, skill_variations_matched
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO cv_analyses (
+      id, job_id, cv_filename, candidate_name,
+      fit_score, experience_score, skills_score, location_score, english_score,
+      briefing, key_strengths, gaps, recommendation, recommendation_reasoning
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
-    data.id, data.job_id, data.cv_filename, data.candidate_name, data.fit_score,
-    data.experience_score, data.skills_score, data.location_score, data.english_score,
-    data.experience_quality_score, data.skill_relevance_score, data.confidence_level,
-    data.years_experience, data.location, data.english_level, data.other_languages,
-    data.summary,
-    JSON.stringify(data.skill_breakdown),
-    JSON.stringify(data.key_strengths),
-    JSON.stringify(data.gaps),
-    JSON.stringify(data.risk_factors),
-    data.recommendation, data.recommendation_reasoning,
-    JSON.stringify(data.reasoning_chain),
-    JSON.stringify(data.skill_evidence),
-    JSON.stringify(data.skill_variations_matched)
+    data.id,
+    data.job_id,
+    data.cv_filename,
+    data.candidate_name,
+    Math.min(100, Math.max(0, data.fit_score || 0)),
+    Math.min(100, Math.max(0, data.experience_score || 0)),
+    Math.min(100, Math.max(0, data.skills_score || 0)),
+    data.location_score === null ? null : Math.min(100, Math.max(0, data.location_score || 0)),
+    Math.min(100, Math.max(0, data.english_score || 0)),
+    data.briefing || '',
+    JSON.stringify(data.key_strengths || []),
+    JSON.stringify(data.gaps || []),
+    data.recommendation || 'maybe',
+    data.recommendation_reasoning || ''
   );
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { JobForm } from './JobForm';
@@ -7,7 +7,7 @@ import { CVUpload } from './CVUpload';
 import { ResultsDashboard } from './ResultsDashboard';
 import { CreditsPanel } from './CreditsPanel';
 import LanguageSelector from './LanguageSelector';
-import { Briefcase, Upload, BarChart3, CreditCard, Settings } from 'lucide-react';
+import { Briefcase, Upload, BarChart3, CreditCard, AlertCircle, X } from 'lucide-react';
 
 type View = 'jobs' | 'upload' | 'results' | 'credits';
 
@@ -17,6 +17,15 @@ export function Dashboard() {
   const [view, setView] = useState<View>('jobs');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [refreshJobs, setRefreshJobs] = useState(0);
+  const [ollamaBanner, setOllamaBanner] = useState<boolean>(false);
+
+  useEffect(() => {
+    (window as any).electronAPI?.checkOllama?.().then((result: any) => {
+      if (!result?.data?.available) {
+        setOllamaBanner(true);
+      }
+    }).catch(() => setOllamaBanner(true));
+  }, []);
 
   const handleJobCreated = () => {
     setView('jobs');
@@ -65,6 +74,21 @@ export function Dashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {ollamaBanner && (
+          <div className="mb-6 bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <p className="text-sm text-amber-800 flex-1">
+              <span className="font-semibold">AI engine not running.</span>{' '}
+              CV AI Scanner requires Ollama to analyse CVs.{' '}
+              <button onClick={() => { setView('credits'); setOllamaBanner(false); }} className="underline font-medium hover:text-amber-900">
+                Set up Ollama in the Credits tab →
+              </button>
+            </p>
+            <button onClick={() => setOllamaBanner(false)} className="text-amber-500 hover:text-amber-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         <div className="flex space-x-2 mb-8 bg-white p-1 rounded-lg shadow-sm inline-flex">
           <button
             onClick={() => setView('jobs')}

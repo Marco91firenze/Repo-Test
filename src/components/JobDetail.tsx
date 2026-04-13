@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { ArrowLeft, MapPin, Languages, Clock, Briefcase, FileText, Trash2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Languages, Clock, Briefcase, FileText, Trash2, Wifi } from 'lucide-react';
 
 interface Job {
   id: string;
@@ -10,9 +10,9 @@ interface Job {
   minimum_experience: number;
   required_skills: string;
   description: string;
+  is_remote: number;
   status: string;
   created_at: string;
-  scoring_parameters: string | null;
 }
 
 interface JobDetailProps {
@@ -110,10 +110,10 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="flex items-center space-x-3 text-slate-700">
-            <MapPin className="w-5 h-5 text-slate-400" />
+            {job.is_remote ? <Wifi className="w-5 h-5 text-blue-500" /> : <MapPin className="w-5 h-5 text-slate-400" />}
             <div>
               <p className="text-xs text-slate-500 font-medium">Location</p>
-              <p className="text-sm">{job.location}</p>
+              <p className="text-sm">{job.is_remote ? 'Remote' : job.location}</p>
             </div>
           </div>
 

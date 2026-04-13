@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
-import { initializeDatabase, getUserProfile, createUserProfile, getJobs, getJob, createJob, deleteJob, getResultsForJob, deleteResult, clearResultsForJob, getSetting, setSetting, getAllSettings, deductCredit, updateCredits } from './services/database.js';
+import { initializeDatabase, getUserProfile, createUserProfile, getJobs, getJob, createJob, deleteJob, getResultsForJob, deleteResult, clearResultsForJob, getSetting, setSetting, getAllSettings, deductCredit, updateCredits, getExistingFilenames } from './services/database.js';
 import { processCVFile } from './services/cvProcessor.js';
 import { checkOllamaStatus, ensureModelAvailable } from './services/ollamaClient.js';
 import { openCheckout, syncPurchases } from './services/purchaseManager.js';
@@ -96,11 +96,11 @@ ipcMain.handle('create-job', async (_event, jobData: {
   id: string;
   title: string;
   location: string;
+  is_remote: number;
   english_level: string;
   minimum_experience: number;
   required_skills: string[];
   description: string;
-  scoring_parameters?: Record<string, unknown> | null;
 }) => {
   try {
     const job = createJob(jobData);
@@ -147,18 +147,21 @@ ipcMain.handle('process-cv', async (_event, filePath: string, jobId: string) => 
 ipcMain.handle('get-results', async (_event, jobId: string) => {
   try {
     const results = getResultsForJob(jobId);
-    // Parse JSON fields for frontend consumption
     const parsed = results.map(r => ({
       ...r,
-      skill_breakdown: JSON.parse(r.skill_breakdown || '[]'),
-      key_strengths: JSON.parse(r.key_strengths || '[]'),
-      gaps: JSON.parse(r.gaps || '[]'),
-      risk_factors: JSON.parse(r.risk_factors || '[]'),
-      reasoning_chain: JSON.parse(r.reasoning_chain || '{}'),
-      skill_evidence: JSON.parse(r.skill_evidence || '{}'),
-      skill_variations_matched: JSON.parse(r.skill_variations_matched || '{}'),
+      key_strengths: JSON.parse((r as any).key_strengths || '[]'),
+      gaps: JSON.parse((r as any).gaps || '[]'),
     }));
     return { success: true, data: parsed };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('get-existing-filenames', async (_event, jobId: string) => {
+  try {
+    const filenames = getExistingFilenames(jobId);
+    return { success: true, data: Array.from(filenames) };
   } catch (error) {
     return { success: false, error: String(error) };
   }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Wifi } from 'lucide-react';
 
 interface JobFormProps {
   onJobCreated: () => void;
@@ -11,6 +11,7 @@ export function JobForm({ onJobCreated }: JobFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
+  const [isRemote, setIsRemote] = useState(false);
   const [englishLevel, setEnglishLevel] = useState('B2');
   const [minExperience, setMinExperience] = useState(0);
   const [skillInput, setSkillInput] = useState('');
@@ -41,7 +42,8 @@ export function JobForm({ onJobCreated }: JobFormProps) {
       const result = await (window as any).electronAPI.createJob({
         id: crypto.randomUUID(),
         title,
-        location,
+        location: isRemote && !location ? 'Remote' : location,
+        is_remote: isRemote ? 1 : 0,
         english_level: englishLevel,
         minimum_experience: minExperience,
         required_skills: skills,
@@ -54,6 +56,7 @@ export function JobForm({ onJobCreated }: JobFormProps) {
 
       setTitle('');
       setLocation('');
+      setIsRemote(false);
       setEnglishLevel('B2');
       setMinExperience(0);
       setSkills([]);
@@ -116,9 +119,21 @@ export function JobForm({ onJobCreated }: JobFormProps) {
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder={t('jobForm.placeholderLocation')}
-              required
+              placeholder={isRemote ? 'Optional — job is remote' : t('jobForm.placeholderLocation')}
+              required={!isRemote}
             />
+            <label className="mt-2 flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isRemote}
+                onChange={(e) => setIsRemote(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-slate-600 flex items-center gap-1">
+                <Wifi className="w-3.5 h-3.5 text-blue-500" />
+                This job is remote
+              </span>
+            </label>
           </div>
         </div>
 

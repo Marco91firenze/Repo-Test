@@ -1,6 +1,6 @@
 {
   "name": "cv-ai-scanner",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "Privacy-first CV ranking tool with local AI analysis",
   "main": "dist-electron/main.js",
   "author": "Marco91firenze",

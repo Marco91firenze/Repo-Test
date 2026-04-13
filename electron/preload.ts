@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Results
   getResults: (jobId: string) => ipcRenderer.invoke('get-results', jobId),
+  getExistingFilenames: (jobId: string) => ipcRenderer.invoke('get-existing-filenames', jobId),
   deleteResult: (resultId: string) => ipcRenderer.invoke('delete-result', resultId),
   clearResults: (jobId: string) => ipcRenderer.invoke('clear-results', jobId),
 

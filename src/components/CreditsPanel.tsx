@@ -231,7 +231,7 @@ export function CreditsPanel() {
                   <span className="font-medium">Download a model</span> — open a terminal and run:
                   <div className="mt-1.5 bg-slate-900 text-green-400 text-xs font-mono rounded-md p-2.5 flex items-center gap-2">
                     <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
-                    ollama pull llama3.1:8b
+                    ollama pull llama3.2:3b
                   </div>
                   <p className="text-xs text-slate-500 mt-1">This is a ~4.7 GB download. Only needed once.</p>
                 </li>

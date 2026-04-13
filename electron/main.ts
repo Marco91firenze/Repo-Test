@@ -133,9 +133,12 @@ ipcMain.handle('select-files', async () => {
   return result.filePaths;
 });
 
-ipcMain.handle('process-cv', async (_event, filePath: string, jobId: string) => {
+ipcMain.handle('process-cv', async (event, filePath: string, jobId: string) => {
   try {
-    const result = await processCVFile(filePath, jobId);
+    const result = await processCVFile(filePath, jobId, (tokens: number) => {
+      // Stream token-count progress back to the renderer that made the request
+      try { event.sender.send('cv-analysis-progress', { tokens }); } catch { /* window closed */ }
+    });
     return { success: true, data: result };
   } catch (error) {
     return { success: false, error: String(error) };

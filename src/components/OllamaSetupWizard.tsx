@@ -167,7 +167,7 @@ export function OllamaSetupWizard({ onComplete }: Props) {
               <p className="font-semibold">What you'll need:</p>
               <ul className="list-disc list-inside space-y-0.5 text-blue-700">
                 <li>~5 minutes and a stable internet connection</li>
-                <li>~6 GB of free disk space for the AI model</li>
+                <li>~2.5 GB of free disk space for the AI model</li>
                 <li>Windows 10 (build 19041+) or Windows 11</li>
               </ul>
             </div>
@@ -281,7 +281,7 @@ export function OllamaSetupWizard({ onComplete }: Props) {
 
                 <div className="bg-slate-900 rounded-xl p-3 flex items-center gap-2.5">
                   <Terminal className="w-4 h-4 text-green-400 flex-shrink-0" />
-                  <p className="text-green-400 text-xs font-mono">ollama pull llama3.1:8b</p>
+                  <p className="text-green-400 text-xs font-mono">ollama pull llama3.2:3b</p>
                 </div>
 
                 <p className="text-xs text-slate-400 text-center">

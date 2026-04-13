@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UserProvider, useUser } from './contexts/UserContext';
 import { LanguageProvider } from './contexts/LanguageContext';
@@ -12,14 +12,17 @@ type OllamaState = 'checking' | 'ready' | 'offline';
 function AppContent() {
   const { user, loading } = useUser();
   const [ollamaState, setOllamaState] = useState<OllamaState>('checking');
+  // Once the wizard has been dismissed in this session, never re-show it
+  // mid-session (e.g. when Ollama crashes during an analysis). The inline
+  // error messages in CVUpload handle that case instead.
+  const wizardShownOnce = useRef(false);
 
-  // Check Ollama status whenever we have a logged-in user
   useEffect(() => {
     if (!user) return;
-    checkOllama();
+    checkOllamaOnStartup();
   }, [user]);
 
-  const checkOllama = async () => {
+  const checkOllamaOnStartup = async () => {
     setOllamaState('checking');
     try {
       const result = await (window as any).electronAPI?.checkOllama?.();
@@ -29,6 +32,21 @@ function AppContent() {
     } catch {
       setOllamaState('offline');
     }
+  };
+
+  const handleWizardComplete = () => {
+    wizardShownOnce.current = true;
+    setOllamaState('ready');
+  };
+
+  // Called by Dashboard if Ollama goes offline mid-session (e.g. user quit it).
+  // Only re-show wizard if it hasn't been dismissed in this session yet.
+  const handleOllamaOffline = () => {
+    if (!wizardShownOnce.current) {
+      setOllamaState('offline');
+    }
+    // If wizard was already completed this session, Dashboard's inline banner
+    // handles it — no need to block the whole app again.
   };
 
   if (loading || (user && ollamaState === 'checking')) {
@@ -41,9 +59,8 @@ function AppContent() {
 
   return (
     <>
-      {/* Wizard overlays everything when Ollama is offline (and user is set up) */}
       {user && ollamaState === 'offline' && (
-        <OllamaSetupWizard onComplete={() => setOllamaState('ready')} />
+        <OllamaSetupWizard onComplete={handleWizardComplete} />
       )}
 
       <Routes>
@@ -55,7 +72,7 @@ function AppContent() {
           path="/app"
           element={
             user
-              ? <Dashboard onOllamaOffline={() => setOllamaState('offline')} />
+              ? <Dashboard onOllamaOffline={handleOllamaOffline} />
               : <Navigate to="/" replace />
           }
         />

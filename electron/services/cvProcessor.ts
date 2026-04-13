@@ -58,7 +58,8 @@ async function extractFromDOCX(filePath: string): Promise<string> {
 
 export async function processCVFile(
   filePath: string,
-  jobId: string
+  jobId: string,
+  onProgress?: (tokens: number) => void
 ): Promise<{
   id: string;
   fit_score: number;
@@ -106,7 +107,7 @@ export async function processCVFile(
     );
   }
 
-  // Step 4: Call Ollama with full raw CV text
+  // Step 4: Call Ollama with full raw CV text (streaming)
   const analysis = await analyzeWithOllama(
     rawText,
     {
@@ -119,7 +120,8 @@ export async function processCVFile(
       is_remote: isRemote,
     },
     ollamaUrl,
-    modelToUse
+    modelToUse,
+    onProgress
   );
 
   // Step 5: Resolve candidate name

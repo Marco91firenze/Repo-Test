@@ -20,6 +20,7 @@ interface SelectedFile {
   status: 'pending' | 'skipped' | 'processing' | 'success' | 'error';
   error?: string;
   elapsed?: number;
+  tokens?: number;
 }
 
 export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
@@ -29,6 +30,7 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(initialJobId);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [processingIndex, setProcessingIndex] = useState<number | null>(null);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const elapsedTimers = useRef<Map<number, ReturnType<typeof setInterval>>>(new Map());
@@ -38,26 +40,38 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   }, []);
 
   useEffect(() => {
-    if (initialJobId) {
-      setSelectedJobId(initialJobId);
-    }
+    if (initialJobId) setSelectedJobId(initialJobId);
   }, [initialJobId]);
+
+  // Subscribe to streaming token progress from the main process
+  useEffect(() => {
+    const cleanup = (window as any).electronAPI?.onCVAnalysisProgress?.(
+      (data: { tokens: number }) => {
+        setProcessingIndex(current => {
+          if (current === null) return current;
+          setFiles(prev => prev.map((f, i) =>
+            i === current ? { ...f, tokens: data.tokens } : f
+          ));
+          return current;
+        });
+      }
+    );
+    return () => { if (cleanup) cleanup(); };
+  }, []);
 
   const loadJobs = async () => {
     try {
       const result = await (window as any).electronAPI.getJobs();
-      if (result?.success && result.data) {
-        setJobs(result.data);
-      }
-    } catch (error) {
-      console.error('Failed to load jobs:', error);
+      if (result?.success && result.data) setJobs(result.data);
+    } catch (err) {
+      console.error('Failed to load jobs:', err);
     }
   };
 
   const handleSelectFiles = async () => {
     try {
       const filePaths = await (window as any).electronAPI.selectFiles();
-      if (filePaths && filePaths.length > 0) {
+      if (filePaths?.length > 0) {
         const newFiles: SelectedFile[] = filePaths.map((p: string) => ({
           path: p,
           name: p.split(/[/\\]/).pop() || p,
@@ -65,25 +79,22 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
         }));
         setFiles(prev => [...prev, ...newFiles]);
       }
-    } catch (error) {
-      console.error('File selection failed:', error);
+    } catch (err) {
+      console.error('File selection failed:', err);
     }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    const validFiles = droppedFiles.filter(f =>
+    const valid = Array.from(e.dataTransfer.files).filter(f =>
       f.type === 'application/pdf' ||
       f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       f.type === 'application/msword'
     );
-    const newFiles: SelectedFile[] = validFiles.map(f => ({
-      path: (f as any).path || f.name,
-      name: f.name,
-      status: 'pending',
-    }));
-    setFiles(prev => [...prev, ...newFiles]);
+    setFiles(prev => [
+      ...prev,
+      ...valid.map(f => ({ path: (f as any).path || f.name, name: f.name, status: 'pending' as const })),
+    ]);
   };
 
   const removeFile = (index: number) => {
@@ -101,35 +112,25 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   };
 
   const stopElapsed = (index: number) => {
-    const timer = elapsedTimers.current.get(index);
-    if (timer) { clearInterval(timer); elapsedTimers.current.delete(index); }
+    const t = elapsedTimers.current.get(index);
+    if (t) { clearInterval(t); elapsedTimers.current.delete(index); }
   };
 
-  const formatElapsed = (s: number) => {
-    if (s < 60) return `${s}s`;
-    return `${Math.floor(s / 60)}m ${s % 60}s`;
-  };
+  const fmt = (s: number) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 
   const handleProcess = async () => {
     if (!selectedJobId || files.length === 0) return;
-
     setOllamaError(null);
 
-    // Check Ollama is available before doing anything
+    // Pre-flight: check Ollama is running and has a model
     try {
-      const ollamaCheck = await (window as any).electronAPI.checkOllama();
-      if (!ollamaCheck?.success || !ollamaCheck?.data?.available) {
-        setOllamaError(
-          'Ollama is not running. Please start Ollama before analysing CVs. ' +
-          'Visit the Credits tab for setup instructions.'
-        );
+      const check = await (window as any).electronAPI.checkOllama();
+      if (!check?.data?.available) {
+        setOllamaError('Ollama is not running. Please start Ollama before analysing CVs.');
         return;
       }
-      if (!ollamaCheck.data.models || ollamaCheck.data.models.length === 0) {
-        setOllamaError(
-          'No AI model found in Ollama. Please run: ollama pull llama3.1:8b — then try again. ' +
-          'See the Credits tab for the full setup guide.'
-        );
+      if (!check.data.models?.length) {
+        setOllamaError('No AI model found in Ollama. Please run: ollama pull llama3.2:3b — then try again.');
         return;
       }
     } catch {
@@ -137,79 +138,62 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
       return;
     }
 
-    // Fetch already-analysed filenames to skip duplicates
-    let existingFilenames: Set<string> = new Set();
+    // Skip already-analysed files
+    let existing: Set<string> = new Set();
     try {
-      const existingResult = await (window as any).electronAPI.getExistingFilenames(selectedJobId);
-      if (existingResult?.success && Array.isArray(existingResult.data)) {
-        existingFilenames = new Set(existingResult.data);
-      }
-    } catch { /* best-effort, continue anyway */ }
+      const r = await (window as any).electronAPI.getExistingFilenames(selectedJobId);
+      if (r?.success && Array.isArray(r.data)) existing = new Set(r.data);
+    } catch { /* best-effort */ }
 
-    // Mark duplicates as skipped before processing
-    const updatedFiles = files.map(f =>
-      f.status === 'pending' && existingFilenames.has(f.name)
-        ? { ...f, status: 'skipped' as const }
-        : f
+    const withSkips = files.map(f =>
+      f.status === 'pending' && existing.has(f.name) ? { ...f, status: 'skipped' as const } : f
     );
-    setFiles(updatedFiles);
+    setFiles(withSkips);
 
-    const pendingFiles = updatedFiles.filter(f => f.status === 'pending');
-    const pendingCount = pendingFiles.length;
-    const creditsAvailable = user?.credits_remaining ?? 0;
-
-    if (pendingCount === 0) {
-      // All files were skipped (duplicates)
-      return;
-    }
-
-    if (creditsAvailable < pendingCount) {
-      setShowUpgradeModal(true);
-      return;
-    }
+    const pendingCount = withSkips.filter(f => f.status === 'pending').length;
+    if (pendingCount === 0) return;
+    if ((user?.credits_remaining ?? 0) < pendingCount) { setShowUpgradeModal(true); return; }
 
     setProcessing(true);
 
-    for (let i = 0; i < updatedFiles.length; i++) {
-      if (updatedFiles[i].status !== 'pending') continue;
+    for (let i = 0; i < withSkips.length; i++) {
+      if (withSkips[i].status !== 'pending') continue;
 
-      setFiles(prev =>
-        prev.map((f, idx) => idx === i ? { ...f, status: 'processing', elapsed: 0 } : f)
-      );
+      setProcessingIndex(i);
+      setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'processing', elapsed: 0, tokens: 0 } : f));
       startElapsed(i);
 
       try {
-        const result = await (window as any).electronAPI.processCv(files[i].path, selectedJobId);
+        const result = await (window as any).electronAPI.processCv(withSkips[i].path, selectedJobId);
         stopElapsed(i);
-        if (!result?.success) {
-          throw new Error(result?.error || 'Processing failed');
-        }
-        setFiles(prev =>
-          prev.map((f, idx) => idx === i ? { ...f, status: 'success' } : f)
-        );
-        await refreshProfile();
-      } catch (error: any) {
-        stopElapsed(i);
-        const raw: string = error.message || 'Analysis failed';
+        setProcessingIndex(null);
 
-        // Ollama-not-running → full banner + abort
-        if (raw.toLowerCase().includes('ollama')) {
+        if (!result?.success) throw new Error(result?.error || 'Processing failed');
+
+        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success', tokens: undefined } : f));
+        await refreshProfile();
+      } catch (err: any) {
+        stopElapsed(i);
+        setProcessingIndex(null);
+
+        const raw: string = err?.message || 'Analysis failed';
+
+        // Determine a user-readable message — always include the raw text for debugging
+        let msg: string;
+        if (raw.toLowerCase().includes('ollama is not running') || raw.toLowerCase().includes('ollama must be running')) {
+          // Show banner and abort the whole batch
           setOllamaError(raw);
-          setFiles(prev =>
-            prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: 'Ollama required — see banner above' } : f)
-          );
+          setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: raw } : f));
           setProcessing(false);
           return;
+        } else if (raw.toLowerCase().includes('fetch') || raw.toLowerCase().includes('econnreset') || raw.toLowerCase().includes('network')) {
+          msg = `Connection to Ollama dropped mid-analysis. This usually means Ollama ran out of memory. Try restarting Ollama, then re-analyse. Details: ${raw}`;
+        } else {
+          // Show the full raw error so we can diagnose unknown failures
+          msg = raw;
         }
 
-        // Timeout → friendlier message
-        const msg = raw.toLowerCase().includes('timeout') || raw.toLowerCase().includes('aborted')
-          ? 'Timed out — the AI model took too long. Try again; if it keeps failing, restart Ollama.'
-          : raw;
-
-        setFiles(prev =>
-          prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: msg } : f)
-        );
+        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: msg, tokens: undefined } : f));
       }
     }
 
@@ -221,20 +205,19 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
       {user && user.credits_remaining <= 3 && user.credits_remaining > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <p className="text-sm text-amber-800">
-            You have {user.credits_remaining} CV selecting credit{user.credits_remaining !== 1 ? 's' : ''} remaining.
+            {user.credits_remaining} credit{user.credits_remaining !== 1 ? 's' : ''} remaining.
           </p>
         </div>
       )}
 
-      {/* Ollama error banner */}
       {ollamaError && (
         <div className="bg-red-50 border border-red-300 rounded-lg p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-semibold text-red-800">AI Engine Required</p>
             <p className="text-sm text-red-700 mt-0.5">{ollamaError}</p>
           </div>
-          <button onClick={() => setOllamaError(null)} className="ml-auto text-red-400 hover:text-red-600">
+          <button onClick={() => setOllamaError(null)} className="text-red-400 hover:text-red-600">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -256,7 +239,7 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
           disabled={processing}
         >
           <option value="">{t('cvUpload.chooseJob')}</option>
-          {jobs.map((job) => (
+          {jobs.map(job => (
             <option key={job.id} value={job.id}>
               {job.title} — {job.is_remote ? '🌐 Remote' : job.location}
             </option>
@@ -272,16 +255,12 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
             className="border-2 border-dashed rounded-xl p-12 text-center transition-colors border-slate-300 hover:border-slate-400"
           >
             <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">
-              Select CV Files
-            </h3>
-            <p className="text-slate-600 mb-4">
-              Drag and drop your CV files here or click to browse
-            </p>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Select CV Files</h3>
+            <p className="text-slate-600 mb-4">Drag and drop your CV files here or click to browse</p>
             <button
               onClick={handleSelectFiles}
               disabled={processing}
-              className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
             >
               Browse Files
             </button>
@@ -289,70 +268,67 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
 
           {files.length > 0 && (
             <div className="space-y-3">
-              <h3 className="font-semibold text-slate-900">
-                {t('cvUpload.files')} ({files.length})
-              </h3>
+              <h3 className="font-semibold text-slate-900">{t('cvUpload.files')} ({files.length})</h3>
+
               {files.map((file, index) => (
                 <div
                   key={index}
-                  className={`flex items-center justify-between p-4 rounded-lg ${
-                    file.status === 'skipped' ? 'bg-slate-50 opacity-70' : 'bg-slate-50'
+                  className={`flex items-start justify-between p-4 rounded-lg ${
+                    file.status === 'error' ? 'bg-red-50' :
+                    file.status === 'success' ? 'bg-green-50' :
+                    file.status === 'skipped' ? 'bg-slate-50 opacity-70' :
+                    'bg-slate-50'
                   }`}
                 >
-                  <div className="flex items-center space-x-3 flex-1">
-                    <FileText className="w-5 h-5 text-slate-400" />
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <FileText className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate">
-                        {file.name}
-                      </p>
-                      {file.status === 'skipped' && (
-                        <p className="text-xs text-slate-500">Already analysed — skipped</p>
+                      <p className="text-sm font-medium text-slate-900 truncate">{file.name}</p>
+
+                      {file.status === 'processing' && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin flex-shrink-0" />
+                          <span className="text-xs text-blue-700 tabular-nums">
+                            AI generating
+                            {file.tokens ? ` · ${file.tokens} tokens` : '…'}
+                            {file.elapsed ? ` · ${fmt(file.elapsed)}` : ''}
+                          </span>
+                        </div>
                       )}
-                      {file.error && (
-                        <p className="text-xs text-red-600">{file.error}</p>
+
+                      {file.status === 'skipped' && (
+                        <p className="text-xs text-slate-500 mt-0.5">Already analysed — skipped</p>
+                      )}
+
+                      {file.status === 'error' && file.error && (
+                        <p className="text-xs text-red-700 mt-1 leading-relaxed break-words">{file.error}</p>
                       )}
                     </div>
-                    {file.status === 'success' && (
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                    )}
-                    {file.status === 'skipped' && (
-                      <Info className="w-5 h-5 text-slate-400" />
-                    )}
-                    {file.status === 'error' && (
-                      <AlertCircle className="w-5 h-5 text-red-600" />
-                    )}
-                    {file.status === 'processing' && (
-                      <div className="flex items-center gap-1.5">
-                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                        {file.elapsed !== undefined && file.elapsed > 0 && (
-                          <span className="text-xs text-slate-500 tabular-nums">
-                            {formatElapsed(file.elapsed)}
-                          </span>
-                        )}
-                      </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                    {file.status === 'success' && <CheckCircle className="w-5 h-5 text-green-600" />}
+                    {file.status === 'skipped' && <Info className="w-5 h-5 text-slate-400" />}
+                    {file.status === 'error' && <AlertCircle className="w-5 h-5 text-red-500" />}
+                    {file.status === 'pending' && !processing && (
+                      <button onClick={() => removeFile(index)} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-5 h-5" />
+                      </button>
                     )}
                   </div>
-                  {file.status === 'pending' && !processing && (
-                    <button
-                      onClick={() => removeFile(index)}
-                      className="text-slate-400 hover:text-slate-600 ml-2"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  )}
                 </div>
               ))}
 
-              <div className="flex space-x-3">
+              <div className="flex gap-3">
                 <button
                   onClick={handleProcess}
                   disabled={processing || files.every(f => f.status !== 'pending')}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {processing && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {processing ? 'Analysing CVs...' : 'Analyse Selected CVs'}
+                  {processing ? 'Analysing CVs…' : 'Analyse Selected CVs'}
                 </button>
-                {files.some(f => f.status === 'success' || f.status === 'skipped') && (
+                {!processing && files.some(f => f.status === 'success' || f.status === 'error' || f.status === 'skipped') && (
                   <button
                     onClick={() => setFiles([])}
                     className="px-6 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-3 rounded-lg transition-colors"
@@ -371,31 +347,20 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
           <div className="bg-white rounded-xl p-8 max-w-md mx-4">
             <h3 className="text-2xl font-bold text-slate-900 mb-4">Not Enough Credits</h3>
             <p className="text-slate-600 mb-6">
-              You have {user?.credits_remaining ?? 0} credit{(user?.credits_remaining ?? 0) !== 1 ? 's' : ''} available, but are trying to select {files.filter(f => f.status === 'pending').length} CVs. Please purchase more credits or select fewer CVs.
+              You have {user?.credits_remaining ?? 0} credit{(user?.credits_remaining ?? 0) !== 1 ? 's' : ''} remaining
+              but are trying to analyse {files.filter(f => f.status === 'pending').length} CVs.
             </p>
             <div className="space-y-3">
-              <button
-                onClick={() => setShowUpgradeModal(false)}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition"
-              >
+              <button onClick={() => setShowUpgradeModal(false)}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition">
                 Select Fewer CVs
               </button>
-              <button
-                onClick={async () => {
-                  setShowUpgradeModal(false);
-                  await (window as any).electronAPI.purchaseCredits('batch_100');
-                }}
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition"
-              >
+              <button onClick={async () => { setShowUpgradeModal(false); await (window as any).electronAPI.purchaseCredits('batch_100'); }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition">
                 Buy 100 Credits (€50)
               </button>
-              <button
-                onClick={async () => {
-                  setShowUpgradeModal(false);
-                  await (window as any).electronAPI.purchaseCredits('batch_1000');
-                }}
-                className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold py-2 rounded-lg transition"
-              >
+              <button onClick={async () => { setShowUpgradeModal(false); await (window as any).electronAPI.purchaseCredits('batch_1000'); }}
+                className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold py-2 rounded-lg transition">
                 Buy 1000 Credits (€300)
               </button>
             </div>

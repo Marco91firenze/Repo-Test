@@ -37,4 +37,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ollama-pull-progress', (_event, data) => callback(data));
     return () => { ipcRenderer.removeAllListeners('ollama-pull-progress'); };
   },
+  onCVAnalysisProgress: (callback: (data: { tokens: number }) => void) => {
+    ipcRenderer.on('cv-analysis-progress', (_event, data) => callback(data));
+    return () => { ipcRenderer.removeAllListeners('cv-analysis-progress'); };
+  },
 });

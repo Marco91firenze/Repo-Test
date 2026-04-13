@@ -20,6 +20,7 @@ interface Candidate {
   location_score: number | null;
   english_score: number;
   briefing: string;
+  summary?: string;
   key_strengths: string[];
   gaps: string[];
   recommendation: string;
@@ -310,10 +311,12 @@ export function ResultsDashboard() {
                 </div>
               </div>
 
-              {/* Briefing — shown by default */}
-              {candidate.briefing && (
+              {/* Briefing — shown by default; fall back to legacy summary for old records */}
+              {(candidate.briefing || candidate.summary) && (
                 <div className="bg-slate-50 rounded-lg p-4 mb-3">
-                  <p className="text-sm text-slate-700 leading-relaxed">{candidate.briefing}</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    {candidate.briefing || candidate.summary}
+                  </p>
                 </div>
               )}
 

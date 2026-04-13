@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { JobForm } from './JobForm';
@@ -11,21 +11,17 @@ import { Briefcase, Upload, BarChart3, CreditCard, AlertCircle, X } from 'lucide
 
 type View = 'jobs' | 'upload' | 'results' | 'credits';
 
-export function Dashboard() {
+interface DashboardProps {
+  onOllamaOffline: () => void;
+}
+
+export function Dashboard({ onOllamaOffline }: DashboardProps) {
   const { user } = useUser();
   const { t } = useLanguage();
   const [view, setView] = useState<View>('jobs');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [refreshJobs, setRefreshJobs] = useState(0);
-  const [ollamaBanner, setOllamaBanner] = useState<boolean>(false);
-
-  useEffect(() => {
-    (window as any).electronAPI?.checkOllama?.().then((result: any) => {
-      if (!result?.data?.available) {
-        setOllamaBanner(true);
-      }
-    }).catch(() => setOllamaBanner(true));
-  }, []);
+  const [ollamaBanner, setOllamaBanner] = useState(false);
 
   const handleJobCreated = () => {
     setView('jobs');
@@ -34,7 +30,30 @@ export function Dashboard() {
 
   const handleJobSelected = (jobId: string) => {
     setSelectedJobId(jobId);
+    navigateToUpload();
+  };
+
+  const navigateToUpload = async () => {
+    // Re-check Ollama whenever the user heads to the upload view
+    try {
+      const result = await (window as any).electronAPI?.checkOllama?.();
+      const available = result?.data?.available === true;
+      const hasModel = Array.isArray(result?.data?.models) && result.data.models.length > 0;
+      if (!available || !hasModel) {
+        // Trigger full wizard overlay from parent
+        onOllamaOffline();
+        return;
+      }
+    } catch {
+      onOllamaOffline();
+      return;
+    }
+    setOllamaBanner(false);
     setView('upload');
+  };
+
+  const handleUploadTabClick = () => {
+    navigateToUpload();
   };
 
   return (
@@ -80,8 +99,11 @@ export function Dashboard() {
             <p className="text-sm text-amber-800 flex-1">
               <span className="font-semibold">AI engine not running.</span>{' '}
               CV AI Scanner requires Ollama to analyse CVs.{' '}
-              <button onClick={() => { setView('credits'); setOllamaBanner(false); }} className="underline font-medium hover:text-amber-900">
-                Set up Ollama in the Credits tab →
+              <button
+                onClick={() => { setOllamaBanner(false); onOllamaOffline(); }}
+                className="underline font-medium hover:text-amber-900"
+              >
+                Set up Ollama →
               </button>
             </p>
             <button onClick={() => setOllamaBanner(false)} className="text-amber-500 hover:text-amber-700">
@@ -89,24 +111,21 @@ export function Dashboard() {
             </button>
           </div>
         )}
+
         <div className="flex space-x-2 mb-8 bg-white p-1 rounded-lg shadow-sm inline-flex">
           <button
             onClick={() => setView('jobs')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-all ${
-              view === 'jobs'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
+              view === 'jobs' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Briefcase className="w-5 h-5" />
             <span>{t('dashboard.jobPosting')}</span>
           </button>
           <button
-            onClick={() => setView('upload')}
+            onClick={handleUploadTabClick}
             className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-all ${
-              view === 'upload'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
+              view === 'upload' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Upload className="w-5 h-5" />
@@ -115,9 +134,7 @@ export function Dashboard() {
           <button
             onClick={() => setView('results')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-all ${
-              view === 'results'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
+              view === 'results' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <BarChart3 className="w-5 h-5" />
@@ -126,9 +143,7 @@ export function Dashboard() {
           <button
             onClick={() => setView('credits')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-md transition-all ${
-              view === 'credits'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:text-slate-900'
+              view === 'credits' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <CreditCard className="w-5 h-5" />

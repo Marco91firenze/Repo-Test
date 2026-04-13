@@ -147,10 +147,12 @@ ipcMain.handle('process-cv', async (_event, filePath: string, jobId: string) => 
 ipcMain.handle('get-results', async (_event, jobId: string) => {
   try {
     const results = getResultsForJob(jobId);
-    const parsed = results.map(r => ({
+    const parsed = results.map((r: any) => ({
       ...r,
-      key_strengths: JSON.parse((r as any).key_strengths || '[]'),
-      gaps: JSON.parse((r as any).gaps || '[]'),
+      key_strengths: JSON.parse(r.key_strengths || '[]'),
+      gaps: JSON.parse(r.gaps || '[]'),
+      // legacy columns may still exist in older DB rows
+      summary: r.summary || '',
     }));
     return { success: true, data: parsed };
   } catch (error) {

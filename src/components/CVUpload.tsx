@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react';
@@ -19,6 +19,7 @@ interface SelectedFile {
   name: string;
   status: 'pending' | 'skipped' | 'processing' | 'success' | 'error';
   error?: string;
+  elapsed?: number;
 }
 
 export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
@@ -30,6 +31,7 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
   const [processing, setProcessing] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const elapsedTimers = useRef<Map<number, ReturnType<typeof setInterval>>>(new Map());
 
   useEffect(() => {
     loadJobs();
@@ -86,6 +88,26 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
 
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const startElapsed = (index: number) => {
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setFiles(prev => prev.map((f, i) =>
+        i === index ? { ...f, elapsed: Math.floor((Date.now() - start) / 1000) } : f
+      ));
+    }, 1000);
+    elapsedTimers.current.set(index, timer);
+  };
+
+  const stopElapsed = (index: number) => {
+    const timer = elapsedTimers.current.get(index);
+    if (timer) { clearInterval(timer); elapsedTimers.current.delete(index); }
+  };
+
+  const formatElapsed = (s: number) => {
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
   };
 
   const handleProcess = async () => {
@@ -152,11 +174,13 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
       if (updatedFiles[i].status !== 'pending') continue;
 
       setFiles(prev =>
-        prev.map((f, idx) => idx === i ? { ...f, status: 'processing' } : f)
+        prev.map((f, idx) => idx === i ? { ...f, status: 'processing', elapsed: 0 } : f)
       );
+      startElapsed(i);
 
       try {
         const result = await (window as any).electronAPI.processCv(files[i].path, selectedJobId);
+        stopElapsed(i);
         if (!result?.success) {
           throw new Error(result?.error || 'Processing failed');
         }
@@ -165,20 +189,26 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
         );
         await refreshProfile();
       } catch (error: any) {
-        const msg: string = error.message || 'Analysis failed';
-        // Propagate Ollama-not-running errors as a banner, not per-file
-        if (msg.toLowerCase().includes('ollama')) {
-          setOllamaError(msg);
+        stopElapsed(i);
+        const raw: string = error.message || 'Analysis failed';
+
+        // Ollama-not-running → full banner + abort
+        if (raw.toLowerCase().includes('ollama')) {
+          setOllamaError(raw);
           setFiles(prev =>
-            prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: 'Ollama required' } : f)
+            prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: 'Ollama required — see banner above' } : f)
           );
           setProcessing(false);
           return;
         }
+
+        // Timeout → friendlier message
+        const msg = raw.toLowerCase().includes('timeout') || raw.toLowerCase().includes('aborted')
+          ? 'Timed out — the AI model took too long. Try again; if it keeps failing, restart Ollama.'
+          : raw;
+
         setFiles(prev =>
-          prev.map((f, idx) =>
-            idx === i ? { ...f, status: 'error', error: msg } : f
-          )
+          prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: msg } : f)
         );
       }
     }
@@ -292,7 +322,14 @@ export function CVUpload({ selectedJobId: initialJobId }: CVUploadProps) {
                       <AlertCircle className="w-5 h-5 text-red-600" />
                     )}
                     {file.status === 'processing' && (
-                      <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                      <div className="flex items-center gap-1.5">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        {file.elapsed !== undefined && file.elapsed > 0 && (
+                          <span className="text-xs text-slate-500 tabular-nums">
+                            {formatElapsed(file.elapsed)}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                   {file.status === 'pending' && !processing && (

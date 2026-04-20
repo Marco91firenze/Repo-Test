@@ -1,0 +1,33 @@
+# Pings Supabase Auth health endpoint on a schedule so the free-tier project
+# stays active (inactivity pause). Add repo secrets: SUPABASE_URL,
+# SUPABASE_ANON_KEY (Settings → Secrets and variables → Actions).
+name: Keep Supabase warm
+
+on:
+  schedule:
+    # Every 3 days at 09:15 UTC (~72h — under typical free-tier pause window)
+    - cron: '15 9 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit Supabase Auth health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -e
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::notice::Set repository secrets SUPABASE_URL and SUPABASE_ANON_KEY to enable keep-warm pings."
+            exit 0
+          fi
+          base="${SUPABASE_URL%/}"
+          code=$(curl -sS -o /tmp/sb_health.json -w '%{http_code}' \
+            "${base}/auth/v1/health" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "HTTP ${code}"
+          cat /tmp/sb_health.json || true
+          test "$code" -ge 200 && test "$code" -lt 300
